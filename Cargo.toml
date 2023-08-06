@@ -1,0 +1,21 @@
+[package]
+name = "client_bot"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio-tungstenite = {version="0.14.0", features=["rustls-tls"]}
+tokio = {version="1.5.0", features=["macros", "rt-multi-thread", "time"]}
+futures-util = "0.3.14"
+http = "0.2.4"
+flate2 = { version = "1.0.20", features = ["zlib-ng-compat"], default-features = false }
+eetf = "0.4"
+regex = "1.5.4"
+hyper = {version = "0.14.9", features = ["client", "http2"]}
+hyper-rustls = {version = "0.22.1", features = ["webpki-roots"]}
+webpki = "0.21.0"
+chrono = "0.4.19"
+json = "0.12.4"
+bounded-vec-deque = "0.1.1"
