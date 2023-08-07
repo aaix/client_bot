@@ -219,7 +219,7 @@ impl Data {
                     Value::String(s)
                 }
             },
-            _ => panic!("unexpected type"),
+            _ => panic!("unexpected type : {:?}", term),
             
             
         }
@@ -264,7 +264,8 @@ pub struct Message {
 #[derive(Debug, Clone)]
 pub struct User {
     pub id: u64,
-    pub name: String,
+    pub displayname: String,
+    pub username: String,
     pub discriminator: u16,
     avatar_hash: String,
     pub bot: bool,
@@ -362,7 +363,12 @@ impl TryFrom<&Data> for User {
             _ => return Err(ParseError::MissingId),
         };
 
-        let name = match payload.d.get("username").unwrap_or_default() {
+        let username = match payload.d.get("username").unwrap_or_default() {
+            Value::String(value) => value.clone(),
+            _ => return Err(ParseError::MissingParam),
+        };
+
+        let displayname = match payload.d.get("global_name").unwrap_or_default() {
             Value::String(value) => value.clone(),
             _ => return Err(ParseError::MissingParam),
         };
@@ -402,7 +408,8 @@ impl TryFrom<&Data> for User {
 
         Ok(User{
             id,
-            name,
+            username,
+            displayname,
             discriminator: discrim,
             avatar_hash: avatar,
             bot,
@@ -424,7 +431,12 @@ impl User {
     }
     
     pub fn display(&self) -> String {
-        format!("{}#{}", self.name, self.discriminator)
+        if self.discriminator != 0 {
+            format!("{}#{}", self.username, self.discriminator)
+        } else {
+            self.username.clone()
+        }
+        
     }
 }
 

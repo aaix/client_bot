@@ -3,13 +3,13 @@ mod inflater;
 
 use inflater::Inflater;
 use obj::{Data, Payload, Value, Reaction};
-use tokio::{net::TcpStream};
+use tokio::net::TcpStream;
 use tokio_tungstenite as tg;
-use tg::{MaybeTlsStream, WebSocketStream, tungstenite::{Message as WSMessage},};
+use tg::{MaybeTlsStream, WebSocketStream, tungstenite::Message as WSMessage,};
 use futures_util::{SinkExt, StreamExt};
 use eetf;
 use json::{self, object};
-use std::{io::Cursor, sync::mpsc::{self, channel}, collections::HashMap};
+use std::{io::Cursor, sync::mpsc::{self}, collections::HashMap};
 use bounded_vec_deque::BoundedVecDeque;
 
 use hyper::{Body, Client, Request, client::{Builder, HttpConnector}};
@@ -504,7 +504,7 @@ impl Gateway{
 
         for attachment in message.attachments {
             if !attachment.renderable {
-                if [".mov", ".mp4"].iter().any(|s| {attachment.filename.ends_with(s)}) {
+                if [".mov", ".mp4", ".mkv"].iter().any(|s| {attachment.filename.ends_with(s)}) {
                     self.send_message(message.channel_id, format!("{} unrenderable", attachment.filename), Some(message.id)).await;
                 }
             }
@@ -624,7 +624,14 @@ impl Gateway{
                     vec![
                         ("status", Value::String("idle".to_string())),
                         ("since", Value::Integer(0)),
-                        ("activities", Value::Array(vec![])),
+                        ("activities", Value::Array(vec![
+                            Value::Data(Data::new(vec![
+                                ("emoji", Value::NoneType),
+                                ("name", Value::String("Custom Status".to_string())),
+                                ("state", Value::String(":3".to_string())),
+                                ("type", Value::Integer(4))
+                            ]))
+                        ])),
                         ("afk", Value::Bool(false)),
                     ]
                 ))),
