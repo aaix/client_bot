@@ -24,6 +24,15 @@ const CLIENT_VERSION: &'static str = "1.0.46";
 const CLIENT_BUILD_NUMBER: &'static i32 = &126462;
 const MESSAGE_CACHE_PER_CHANNEL: &'static usize = &1000;
 
+
+fn headtail(s: &String) -> (&str, Option<&str>) {
+    let mut split = s.splitn(2, ' ');
+    let head = split.next().unwrap();
+    let tail = split.next();
+    (head, tail)
+}
+
+
 async fn create_socket() -> (WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>, hyper::Response<()>) {
     let request = Request::builder()
     .uri("wss://gateway.discord.gg/?encoding=etf&v=6&compress=zlib-stream")
@@ -222,6 +231,7 @@ impl Gateway{
                 user
             } else {return}
         } else {return};
+        // println!("Cached updated with {}, from {:?}", user.display(), payload.t);
         self.user_cache.insert(user.id, user);
     }
     
@@ -249,7 +259,7 @@ impl Gateway{
                                 self.add_snipe(payload).await
                             }
                             _ => {
-                                //println!("{}", event);
+                                // println!("{} - {:#?}", event, payload.d);
                             }
                         }
                     },
@@ -413,20 +423,25 @@ impl Gateway{
             return
         }
 
+        // transcode
+
+        for attachment in &message.attachments {
+            if !attachment.renderable {
+                if [".mov", ".mp4", ".mkv"].iter().any(|s| {attachment.filename.ends_with(s)}) {
+                    self.send_message(message.channel_id, format!("{} unrenderable", attachment.filename), Some(message.id)).await;
+                }
+            }
+        }
+
+
         if let Some(content) = message.content.clone() {
-            let command = content.split(' ').nth(0).unwrap();
+            let (command, arg) = headtail(&content);
             match command.to_lowercase().as_str() {
                 "ping" => {
-                    match self.send_message(message.channel_id, "ping", Some(message.id)).await {
-                        Ok(_) => {}
-                        Err(e) => println!("Http error {:?}\n{:?}", message, e)
-                    }
+                    self.send_message(message.channel_id, "ping", Some(message.id)).await;
                 },
                 "av" => {
-                    match self.send_message(message.channel_id, message.author.avatar(4096), Some(message.id)).await {
-                        Ok(_) => {}
-                        Err(e) => println!("Http error {:?}\n{:?}", message, e)
-                    }
+                    self.command_av(message, arg).await;
                 },
                 "soblb" => {
                     let mut leaderboard = String::with_capacity(self.sob_lb.len() * 32);
@@ -441,10 +456,7 @@ impl Gateway{
                         leaderboard.push_str(format!("<@{}> - {}\n", user, sobs).as_str())
                     }
 
-                    match self.send_message(message.channel_id, leaderboard, Some(message.id)).await {
-                        Ok(_) => {}
-                        Err(e) => println!("Http error {:?}\n{:?}", message, e)
-                    }
+                    self.send_message(message.channel_id, leaderboard, Some(message.id)).await;
                 },
                 "cache" => {
                     let mut total: usize = 0;
@@ -453,15 +465,12 @@ impl Gateway{
                         total += v.len()
                     }
 
-                    match self.send_message(message.channel_id, format!(
+                    self.send_message(message.channel_id, format!(
                         "Message cache:\nChannels: {}\nMessages: {}\nUsers: {}",
                         self.message_cache.len(),
                         total,
                         self.user_cache.len(),
-                    ), Some(message.id)).await {
-                        Ok(_) => {}
-                        Err(e) => println!("Http error {:?}\n{:?}", message, e)
-                    }
+                    ), Some(message.id)).await
                 }
 
                 "snipe" => {
@@ -485,14 +494,14 @@ impl Gateway{
                                 message.channel_id,
                                 formatted,
                                 Some(message.id)
-                            ).await.ok();
+                            ).await;
                         }
                         None => {
                             self.send_message(
                                 message.channel_id,
                                 "no snipe",
                                 Some(message.id)
-                            ).await.ok();
+                            ).await;
                         }
                     }
                 }
@@ -500,17 +509,41 @@ impl Gateway{
             }
         };
 
-        // transcode
 
-        for attachment in message.attachments {
-            if !attachment.renderable {
-                if [".mov", ".mp4", ".mkv"].iter().any(|s| {attachment.filename.ends_with(s)}) {
-                    self.send_message(message.channel_id, format!("{} unrenderable", attachment.filename), Some(message.id)).await;
+
+        return
+    }
+
+    fn parse_arg_user(&self, term: &str) -> Option<&User> {
+        // mention regex
+        let re = regex::Regex::new(r"<@!*(&*[0-9]{14,20})>").unwrap();
+        if let Some(caps) = re.captures(term) {
+            return self.user_cache.get(&u64::from_str_radix(&caps.get(1).unwrap().as_str(), 10).unwrap())
+        }
+
+        for user in self.user_cache.values() {
+            if user.username == term || user.display() == term {
+                return Some(user);
+            };
+        };
+
+        None
+    }
+
+    async fn command_av(&self, message: Message, args: Option<&str>) {
+        match args {
+            Some(arg) => {
+                if let Some(user) = self.parse_arg_user(arg) {
+                    self.send_message(message.channel_id, user.avatar(4096), Some(message.id)).await;
+                } else {
+                    self.send_message(message.channel_id, "Couldnt find that user", Some(message.id)).await;
                 }
+            },
+            None => {
+                self.send_message(message.channel_id, message.author.avatar(4096), Some(message.id)).await;
             }
         }
 
-        return
     }
 
     fn update_sob_lb(&mut self, payload: Payload) {
@@ -552,7 +585,7 @@ impl Gateway{
 
     }
 
-    async fn send_message<T: Into<String>>(&self, channel: u64, message_content: T, reference: Option<u64>) -> Result<http::Response<Body>, hyper::Error> {
+    async fn send_message<T: Into<String>>(&self, channel: u64, message_content: T, reference: Option<u64>) {
         let content: String = message_content.into();
         let route = format!("https://discord.com/api/v9/channels/{}/messages", channel);
         let mut body = object! {
@@ -566,7 +599,10 @@ impl Gateway{
             }).unwrap();
         };
 
-        self.send_as_json(route, body, "POST").await
+        match self.send_as_json(route, body, "POST").await {
+            Ok(_) => {}
+            Err(e) => println!("Http error sending to <#{}> - {:?}", channel, e)
+        };
     }
 
     async fn send_as_json(&self, uri: String, body: json::JsonValue, method: &str) -> Result<http::Response<Body>, hyper::Error> {
