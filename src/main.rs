@@ -526,7 +526,7 @@ impl Gateway{
         }
 
         for user in self.user_cache.values() {
-            if user.username == term || user.display() == term {
+            if user.username == term || user.display() == term || user.friendly_display() == term {
                 return Some(user);
             };
         };
