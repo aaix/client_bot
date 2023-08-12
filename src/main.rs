@@ -453,7 +453,11 @@ impl Gateway{
 
                     for (user, sobs) in lb.iter().rev() {
                         if sobs == &&0 {continue}
-                        leaderboard.push_str(format!("<@{}> - {}\n", user, sobs).as_str())
+                        let d = match self.user_cache.get(user) {
+                            Some(u) => u.friendly_display(),
+                            None => format!("{}", user),
+                        };
+                        leaderboard.push_str(format!("{} - {}\n", d, sobs).as_str())
                     }
 
                     self.send_message(message.channel_id, leaderboard, Some(message.id)).await;

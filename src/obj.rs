@@ -204,7 +204,13 @@ impl Data {
             Term::Atom(atom) => {
                 match atom.name.parse::<bool>() {
                     Ok(result) => Value::Bool(result),
-                    Err(_) => Value::String(atom.name.clone()),
+                    Err(_) => {
+                        if atom.name == "nil" {
+                            Value::NoneType
+                        } else {
+                            Value::String(atom.name.clone())
+                        }
+                    },
                 }
             },
             Term::BigInteger(bigint) => Value::BigInt(bigint.value.to_string().parse().unwrap()),
@@ -213,7 +219,7 @@ impl Data {
             Term::Map(_) => Value::Data(Data::from_map(term.clone())),
             Term::Binary(bytes) => {
                 let s = String::from_utf8(bytes.bytes.clone()).unwrap();
-                if s == "" {
+                if s == "" || s == "nil" {
                     Value::NoneType
                 } else {
                     Value::String(s)
@@ -264,7 +270,7 @@ pub struct Message {
 #[derive(Debug, Clone)]
 pub struct User {
     pub id: u64,
-    pub displayname: String,
+    pub displayname: Option<String>,
     pub username: String,
     pub discriminator: u16,
     avatar_hash: String,
@@ -369,7 +375,8 @@ impl TryFrom<&Data> for User {
         };
 
         let displayname = match payload.d.get("global_name").unwrap_or_default() {
-            Value::String(value) => value.clone(),
+            Value::String(value) => Some(value.clone()),
+            Value::NoneType => None,
             _ => return Err(ParseError::MissingParam),
         };
 
@@ -429,6 +436,15 @@ impl User {
         };
         format!("https://cdn.discordapp.com/avatars/{}/{}.{}?size={}",self.id, self.avatar_hash, ext, size)
     }
+    pub fn friendly_display(&self) -> String {
+        if let Some(dname) = &self.displayname {
+            dname.clone()
+        } else {
+            self.display()
+        }
+        
+    }
+
     
     pub fn display(&self) -> String {
         if self.discriminator != 0 {
