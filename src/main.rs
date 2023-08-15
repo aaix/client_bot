@@ -435,10 +435,21 @@ impl Gateway{
 
 
         if let Some(content) = message.content.clone() {
+
+            // tiktok rewrites
+            {
+                let re = regex::Regex::new(r"(https://((www.tiktok.com/t/)|(vm.tiktok.com/))([0-9,a-z,A-Z]{8,10}))").unwrap();
+                if let Some(m) = re.captures(&content) {
+                    let id = m.iter().last().unwrap().unwrap().as_str();
+                    self.send_message(message.channel_id, format!("https://tiktok.ily.pink/{}", id) , Some(message.id)).await;
+                    return;
+                }
+            }
+
             let (command, arg) = headtail(&content);
             match command.to_lowercase().as_str() {
                 "ping" => {
-                    self.send_message(message.channel_id, "ping", Some(message.id)).await;
+                    self.send_message(message.channel_id, "pong :3", Some(message.id)).await;
                 },
                 "av" => {
                     self.command_av(message, arg).await;
