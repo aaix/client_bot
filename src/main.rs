@@ -104,7 +104,7 @@ struct Gateway {
     inflater: inflater::Inflater,
     authenticated: bool,
     message_cache: HashMap<u64, BoundedVecDeque<Message>>,
-    sob_lb: HashMap<u64, u64>,
+    sob_lb: HashMap<(u64, u64), u64>,
     snipes: HashMap<u64, Message>,
     user_cache: HashMap<u64, User>,
 }
@@ -457,13 +457,14 @@ impl Gateway{
                 "soblb" => {
                     let mut leaderboard = String::with_capacity(self.sob_lb.len() * 32);
 
-                    let mut lb = self.sob_lb.iter().collect::<Vec<(&u64,&u64)>>();
+                    let mut lb = self.sob_lb.iter().collect::<Vec<(&(u64, u64), &u64)>>();
                     lb.sort_by(|a,b| {a.1.cmp(b.1)});
 
                     leaderboard.push_str("SOBS!!! :\n");
 
-                    for (user, sobs) in lb.iter().rev() {
-                        if sobs == &&0 {continue}
+                    for ((user, channel), sobs) in lb.iter().rev() {
+                        if **sobs == 0 {continue};
+                        if *channel != message.channel_id {continue};
                         let d = match self.user_cache.get(user) {
                             Some(u) => u.friendly_display(),
                             None => format!("{}", user),
@@ -576,7 +577,7 @@ impl Gateway{
                         Ok(index) => {
                             let user_id = queue[index].author.id;
                             if event.reactor == user_id {return}
-                            *self.sob_lb.entry(user_id).or_insert(0) += 1;
+                            *self.sob_lb.entry((user_id, event.channel)).or_insert(0) += 1;
                         },
                         Err(_) => {},
                     }
@@ -590,7 +591,7 @@ impl Gateway{
                         Ok(index) => {
                             let user_id = queue[index].author.id;
                             if event.reactor == user_id {return}
-                            *self.sob_lb.entry(user_id).or_insert(1) -= 1;
+                            *self.sob_lb.entry((user_id, event.channel)).or_insert(1) -= 1;
                         },
                         Err(_) => {},
                     }

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt,};
 
-use eetf::{Atom, BigInteger, Binary, FixInteger, List, Map, Term};
+use eetf::{Atom, BigInteger, Binary, FixInteger, List, Map, Term, Float};
 
 #[derive(Debug)]
 pub enum SerialiseError {
@@ -97,6 +97,7 @@ pub enum Value {
     BigInt(u64),
     Data(Data),
     Array(Vec<Self>),
+    Float(f64),
     NoneType,
 }
 
@@ -109,6 +110,7 @@ impl fmt::Debug for Value {
             Value::BigInt(int) => write!(f, "B{}", int),
             Value::Data(data) => write!(f, "D{:?}", data),
             Value::Array(vec) => write!(f, "A{:?}", vec),
+            Value::Float(flt) => write!(f, "f{:?}", flt),
             Value::NoneType => write!(f, "None"),
         }
     }
@@ -225,6 +227,7 @@ impl Data {
                     Value::String(s)
                 }
             },
+            Term::Float(f) => Value::Float(f.value),
             _ => panic!("unexpected type : {:?}", term),
             
             
@@ -252,6 +255,7 @@ impl Data {
             Value::BigInt(int) => Term::from(BigInteger::from(int.clone())),
             Value::Data(d) => Term::from(d.to_map().clone()),
             Value::Array(array) => Term::from(List::from(array.clone().iter().map(|v| {Self::to_term(v)}).collect::<Vec<Term>>())),
+            Value::Float(flt) => Term::from(Float {value: *flt}), // if its not finite idc
             Value::NoneType => Term::from(Atom::from("nil")),
         }
     }
