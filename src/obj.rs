@@ -277,7 +277,8 @@ pub struct User {
     pub displayname: Option<String>,
     pub username: String,
     pub discriminator: u16,
-    avatar_hash: String,
+    avatar_hash: Option<String>,
+    banner_hash: Option<String>,
     pub bot: bool,
     pub flags: u64,
 }
@@ -395,7 +396,14 @@ impl TryFrom<&Data> for User {
         };
 
         let avatar = match payload.d.get("avatar").unwrap_or_default() {
-            Value::String(value) => value.clone(),
+            Value::String(value) => Some(value.clone()),
+            Value::NoneType => None,
+            _ => return Err(ParseError::MissingParam),
+        };
+
+        let banner = match payload.d.get("banner").unwrap_or_default() {
+            Value::String(value) => Some(value.clone()),
+            Value::NoneType => None,
             _ => return Err(ParseError::MissingParam),
         };
 
@@ -423,6 +431,7 @@ impl TryFrom<&Data> for User {
             displayname,
             discriminator: discrim,
             avatar_hash: avatar,
+            banner_hash: banner,
             bot,
             flags,
         })
@@ -434,12 +443,34 @@ impl TryFrom<&Data> for User {
 
 impl User {
     pub fn avatar(&self, size: u16) -> String {
-        let ext = match self.avatar_hash.starts_with("a_") {
+        if let Some(av) = self.avatar_hash.as_ref() {
+           let ext = match av.starts_with("a_") {
             true => "gif",
             false => "jpg",
         };
-        format!("https://cdn.discordapp.com/avatars/{}/{}.{}?size={}",self.id, self.avatar_hash, ext, size)
+        format!("https://cdn.discordapp.com/avatars/{}/{}.{}?size={}",self.id, av, ext, size) 
+        } else {
+            if self.discriminator != 0 {
+                format!("https://cdn.discordapp.com/embed/avatars/{}.png", self.discriminator % 5)
+            } else {
+                format!("https://cdn.discordapp.com/embed/avatars/{}.png", (self.id >> 22) % 6)
+            }
+        }
+        
     }
+
+    pub fn banner(&self, size: u16) -> Option<String> {
+        if let Some(banner) = self.banner_hash.as_ref() {
+            let ext = match banner.starts_with("a_") {
+                true => "gif",
+                false => "jpg"
+            };
+            Some(format!("https://cdn.discordapp.com/banners/{}/{}.{}?size={}",self.id, banner, ext, size))
+        } else {
+            None
+        }
+    }
+    
     pub fn friendly_display(&self) -> String {
         if let Some(dname) = &self.displayname {
             dname.clone()

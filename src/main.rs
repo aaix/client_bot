@@ -231,7 +231,6 @@ impl Gateway{
                 user
             } else {return}
         } else {return};
-        // println!("Cached updated with {}, from {:?}", user.display(), payload.t);
         self.user_cache.insert(user.id, user);
     }
     
@@ -454,6 +453,9 @@ impl Gateway{
                 "av" => {
                     self.command_av(message, arg).await;
                 },
+                "banner" => {
+                    self.command_banner(message, arg).await;
+                },
                 "soblb" => {
                     let mut leaderboard = String::with_capacity(self.sob_lb.len() * 32);
 
@@ -559,6 +561,25 @@ impl Gateway{
                 self.send_message(message.channel_id, message.author.avatar(4096), Some(message.id)).await;
             }
         }
+
+    }
+
+    async fn command_banner(&self, message: Message, args: Option<&str>) {
+        let b = match args {
+            Some(arg) => {
+                if let Some(user) = self.parse_arg_user(arg) {
+                    user.banner(4096)
+                } else {
+                    self.send_message(message.channel_id, "Couldnt find that user", Some(message.id)).await;
+                    return;
+                }
+            },
+            None => {
+                message.author.banner(4096)
+            }
+        };
+
+        self.send_message(message.channel_id, b.unwrap_or("no banner".to_string()), Some(message.id)).await;
 
     }
 
