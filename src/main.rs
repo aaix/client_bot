@@ -112,76 +112,78 @@ struct Gateway {
 impl Gateway{
     async fn start(&mut self) {
         
+        // actual indent hell.
+        // todo refactor into a diff function and use ? operator instead of matching all these errors
+
         let channel  = mpsc::channel::<bool>(); 
 
         loop {
-            match tokio::time::timeout(tokio::time::Duration::from_secs(1), self.socket.next()).await {
-                Ok(msg) => {
-                    match msg {
-                        Some(event) => {
-                            match event {
-                                Ok(message) => {
-                                    match message {
-                                        WSMessage::Binary(bytes) => {
-                                            self.inflater.extend(bytes.as_slice());
-                                        }
-                                        WSMessage::Close(close) => {
-                                            if let Some(cf) = close {
-                                                println!("WS CLOSED WITH CODE {}, REASON ({})\n", cf.code, cf.reason);
-                                                match cf.code.into() {
-                                                    1000 | 1001 => {return}, // Unresumable Closes
-                                                    4004 => {panic!("TOKEN NO LONGER VALID {:?}", cf)} // Invalid authentication
-                                                    4007 | 4009 => {return}, // Something went wrong when resuming
-                                                    4000..=4008 => {self.resume().await;} // Should be handled
-                                                    _ => {self.resume().await;} // Unknown close, try to resume ?
-                                                }
-                                            } else {
-                                                println!("Websocket closed with no close frame\n");
-                                                return
-                                            }
-                                        },
-                                        _ => {
-                                            println!("got other message type. - {:?}", message)
-                                        }
-                                    }
+            // here we only wait for a message for a second, otherwise we poll the heartbeat channel
+            if let Ok(msg) = tokio::time::timeout(tokio::time::Duration::from_secs(1), self.socket.next()).await {
+                if let Some(event) = msg {
+                    match event {
+                        Ok(message) => {
+                            match message {
+                                WSMessage::Binary(bytes) => {
+                                    self.inflater.extend(bytes.as_slice());
                                 }
-                                Err(error) => {
-                                    println!("Got error, {:?} - resuming", error);
-                                    self.resume().await;
+                                WSMessage::Close(close) => {
+                                    if let Some(cf) = close {
+                                        println!("WS CLOSED WITH CODE {}, REASON ({})\n", cf.code, cf.reason);
+                                        match cf.code.into() {
+                                            1000 | 1001 => {return}, // Unresumable Closes
+                                            4004 => {panic!("TOKEN NO LONGER VALID {:?}", cf)} // Invalid authentication
+                                            4007 | 4009 => {return}, // Something went wrong when resuming
+                                            4000..=4008 => {self.resume().await;} // Should be handled
+                                            _ => {self.resume().await;} // Unknown close, try to resume ?
+                                        }
+                                    } else {
+                                        println!("Websocket closed with no close frame\n");
+                                        return
+                                    }
                                 },
-                            }
-                            
-                    
-                            match self.inflater.msg() {
-                                Ok(bytes) => {
-                                    if bytes.is_none() {
-                                        continue
-                                    };
-                
-                                    match eetf::Term::decode(Cursor::new(&bytes.unwrap())) {
-                                        Ok(term) => {
-                                            let payload = match Payload::new(term) {
-                                                Ok(payload) => payload,
-                                                Err(error) => {
-                                                    println!("Deserialize error, {:?}", error);
-                                                    continue
-                                                }
-                                            };
-                                            self.handle_payload(payload, &channel).await
-                                        },
-                                        Err(error) => println!("Decoder error {:?}", error),
-                                    }
-                                    
-                                    self.inflater.clear();
+                                _ => {
+                                    println!("got other message type. - {:?}", message)
                                 }
-                                Err(error) => println!("Error inflating {:?}",error),
                             }
+                        }
+                        Err(error) => {
+                            println!("Got error, {:?} - resuming", error);
+                            self.resume().await;
                         },
-                        None => {}, // No message - continue with loop
                     }
-                },
-                Err(_) => {}, // Timed out - continue with loop
+            
+    
+                    // poll the inflater for a message, if its none we only have a partial message
+                    match self.inflater.msg() {
+                        Ok(bytes) => {
+                            if bytes.is_none() {
+                                continue
+                            };
+
+                            match eetf::Term::decode(Cursor::new(&bytes.unwrap())) {
+                                Ok(term) => {
+                                    let payload = match Payload::new(term) {
+                                        Ok(payload) => payload,
+                                        Err(error) => {
+                                            println!("Deserialize error, {:?}", error);
+                                            continue
+                                        }
+                                    };
+                                    self.handle_payload(payload, &channel).await
+                                },
+                                Err(error) => println!("Decoder error {:?}", error),
+                            }
+
+                            self.inflater.clear();
+                        }
+                        Err(error) => println!("Error inflating {:?}",error),
+                    }
+                }
             };
+
+
+            // try heartbeat
             match channel.1.try_recv() {
                 Ok(_) => self.heartbeat().await,
                 Err(error) => {
