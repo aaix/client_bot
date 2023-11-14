@@ -456,6 +456,23 @@ impl Gateway{
                 "banner" => {
                     self.command_banner(message, arg).await;
                 },
+
+                "payload" => {
+                    self.send_message(message.channel_id, format!("{:?}", payload), Some(message.id)).await;
+                },
+
+                "user" => {
+                    let u = if let Some(a) = arg {
+                        if let Some(user) = self.parse_arg_user(a) {
+                            user
+                        } else {
+                            &message.author
+                        }
+                    } else {
+                        &message.author
+                    };
+                    self.send_message(message.channel_id, format!("{:?}", u), Some(message.id)).await;
+                },
                 "soblb" => {
                     let mut leaderboard = String::with_capacity(self.sob_lb.len() * 32);
 
