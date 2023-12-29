@@ -9,7 +9,7 @@ use tg::{MaybeTlsStream, WebSocketStream, tungstenite::Message as WSMessage,};
 use futures_util::{SinkExt, StreamExt};
 use eetf;
 use json::{self, object};
-use std::{io::Cursor, sync::mpsc::{self}, collections::HashMap};
+use std::{io::Cursor, sync::mpsc::{self}, collections::HashMap, thread};
 use bounded_vec_deque::BoundedVecDeque;
 
 use hyper::{Body, Client, Request, client::{Builder, HttpConnector}};
@@ -57,7 +57,9 @@ async fn main() {
         }
         Err(why) => {
             println!("Couldn't open ./TOKEN file, {}", why);
-            loop {}
+            loop {
+                thread::park();
+            }
         }
     };
 
@@ -285,7 +287,7 @@ impl Gateway{
                 self.authenticated = false;
                 let resumable: bool = match payload.d.d.get("value") {
                     Some(value) => match value {
-                        Value::Bool(b) => b.clone(),
+                        Value::Bool(b) => *b,
                         _ => false,
                     }
                     None => false,
