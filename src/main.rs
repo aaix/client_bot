@@ -282,7 +282,7 @@ impl Gateway{
                             "MESSAGE_DELETE" => {
                                 self.add_snipe(payload).await
                             }
-                            "CHANNEL_UPDATE" => {
+                            "CHANNEL_UPDATE" | "CHANNEL_CREATE" => {
                                 self.update_channel_cache(payload)
                             }
                             _ => {
@@ -441,6 +441,10 @@ impl Gateway{
                 message.channel_id,
                 cache
             );
+        }
+
+        if let Some(channel) = self.channel_cache.get_mut(&message.channel_id) {
+            channel.last_message_id = Some(message.id);
         }
 
         if let Some(current_user) = &self.user {
