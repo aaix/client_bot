@@ -2,6 +2,24 @@ use std::{collections::HashMap, fmt,};
 
 use eetf::{Atom, BigInteger, Binary, FixInteger, List, Map, Term, Float};
 
+
+enum ChannelType {
+    GuildText = 0,
+    DM = 1,
+    GuildVoice = 2,
+    GroupDM = 3,
+    GuildCategory = 4,
+    GuildAnnouncement = 5,
+    AnnouncementThread = 10,
+    PublicThread = 11,
+    PrivateThread = 12,
+    GuildStageVoice = 13,
+    GuildDirectory = 14,
+    GuildForum = 15,
+    GuildMedia = 16,
+}
+
+
 #[derive(Debug)]
 pub enum SerialiseError {
     BadSequence,
@@ -161,7 +179,13 @@ impl Data {
                             Term::Binary(bytes) => {
                                 String::from_utf8(bytes.bytes.clone()).unwrap()
                             }
-                            _ => panic!(),
+                            Term::FixInteger(int) => {
+                                int.value.to_string()
+                            },
+                            _ => {
+                                println!("unexpected key type {:?}, deserialising map {:?}", k, map);
+                                continue;
+                            }
                         },
                         Self::from_term(v),
                     );
@@ -446,7 +470,7 @@ impl User {
         if let Some(av) = self.avatar_hash.as_ref() {
            let ext = match av.starts_with("a_") {
             true => "gif",
-            false => "jpg",
+            false => "png",
         };
         format!("https://cdn.discordapp.com/avatars/{}/{}.{}?size={}",self.id, av, ext, size) 
         } else {
@@ -656,5 +680,114 @@ impl TryFrom<&Data> for Emoji {
                 id,
             }
         )
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct DMChannel {
+    pub name: Option<String>,
+    pub id: u64,
+    pub recipients: Vec<User>,
+    pub last_message_id: Option<u64>,
+    pub icon_hash: Option<String>,
+    pub last_pin_timestamp: Option<String>,
+    pub flags: u64,
+    pub r#type: u64,
+    pub owner_id: Option<u64>,
+}
+
+impl TryFrom<&Data> for DMChannel {
+    type Error = ParseError;
+
+    fn try_from(data: &Data) -> Result<Self, Self::Error> {
+
+        let r#type = match data.d.get("type").unwrap_or_default() {
+            Value::Integer(value) => *value as u64,
+            _ => return Err(ParseError::BadParam),
+        };
+
+
+        let name = match data.d.get("name").unwrap_or_default() {
+            Value::String(value) => Some(value.clone()),
+            Value::NoneType => None,
+            _ => return Err(ParseError::MissingParam),
+        };
+
+        let id = match data.d.get("id").unwrap_or_default() {
+            Value::BigInt(value) => value.clone(),
+            _ => return Err(ParseError::MissingParam),
+        };
+
+        let recipients = match data.d.get("recipients").unwrap_or_default() {
+            Value::Array(array) => {
+                array.iter().map(|v| {
+                    if let Value::Data(user_data) = v {
+                        User::try_from(user_data).ok()
+                    } else {
+                        None
+                    }
+                }).filter_map(std::convert::identity).collect::<Vec<User>>()
+            },
+            _ => Vec::new(),
+        };
+
+        let last_message_id = match data.d.get("last_message_id").unwrap_or_default() {
+            Value::BigInt(value) => Some(value.clone()),
+            Value::NoneType => None,
+            _ => return Err(ParseError::BadParam),
+        };
+
+        let icon_hash = match data.d.get("icon").unwrap_or_default() {
+            Value::String(value) => Some(value.clone()),
+            Value::NoneType => None,
+            _ => return Err(ParseError::BadParam),
+        };
+
+        let last_pin_timestamp = match data.d.get("last_pin_timestamp").unwrap_or_default() {
+            Value::String(value) => Some(value.clone()),
+            Value::NoneType => None,
+            _ => return Err(ParseError::BadParam),
+        };
+
+        let flags = match data.d.get("flags").unwrap_or_default() {
+            Value::Integer(value) => *value as u64,
+            Value::NoneType => 0,
+            _ => return Err(ParseError::BadParam),
+        };
+
+        let owner_id = match data.d.get("owner_id").unwrap_or_default() {
+            Value::BigInt(value) => Some(value.clone()),
+            Value::NoneType => None,
+            _ => return Err(ParseError::BadParam),
+        };
+
+        Ok(
+            DMChannel {
+                name,
+                id,
+                recipients,
+                last_message_id,
+                icon_hash,
+                last_pin_timestamp,
+                flags,
+                r#type,
+                owner_id,
+            }
+        )
+    }
+}
+
+impl DMChannel {
+    pub fn icon(&self, size: u16) -> String {
+        if let Some(icon) = self.icon_hash.as_ref() {
+            let ext = match icon.starts_with("a_") {
+                true => "gif",
+                false => "png",
+            };
+            format!("https://cdn.discordapp.com/channel-icons/{}/{}.{}?size={}", self.id, icon, ext, size)
+        } else {
+            format!("https://cdn.discordapp.com/embed/avatars/{}.png", (self.id >> 22) % 6)
+        }
     }
 }

@@ -1,8 +1,9 @@
 mod obj;
 mod inflater;
 
+use chrono::{DateTime, Utc};
 use inflater::Inflater;
-use obj::{Data, Payload, Value, Reaction};
+use obj::{DMChannel, Data, Payload, Reaction, Value};
 use tokio::net::TcpStream;
 use tokio_tungstenite as tg;
 use tg::{MaybeTlsStream, WebSocketStream, tungstenite::Message as WSMessage,};
@@ -74,6 +75,7 @@ async fn main() {
 
 
         let mut client = Gateway {
+            created: Utc::now(),
             token: token.to_string(),
             user: None,
             socket,
@@ -84,6 +86,7 @@ async fn main() {
             inflater: Inflater::new(),
             authenticated: false,
             message_cache: HashMap::new(),
+            channel_cache: HashMap::new(),
             sob_lb: HashMap::new(),
             snipes: HashMap::new(),
             user_cache: HashMap::new(),
@@ -96,6 +99,7 @@ async fn main() {
 
 
 struct Gateway {
+    created: DateTime<Utc>,
     token: String,
     user: Option<User>,
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
@@ -106,6 +110,7 @@ struct Gateway {
     inflater: inflater::Inflater,
     authenticated: bool,
     message_cache: HashMap<u64, BoundedVecDeque<Message>>,
+    channel_cache: HashMap<u64, DMChannel>,
     sob_lb: HashMap<(u64, u64), u64>,
     snipes: HashMap<u64, Message>,
     user_cache: HashMap<u64, User>,
@@ -220,7 +225,7 @@ impl Gateway{
         };
     }
 
-    fn update_cache(&mut self, payload: &Payload) {
+    fn update_user_cache(&mut self, payload: &Payload) {
 
         let data = match payload.d.d.get("user") {
             Some(user) => user,
@@ -237,6 +242,22 @@ impl Gateway{
         } else {return};
         self.user_cache.insert(user.id, user);
     }
+
+    fn update_channel_cache(&mut self, payload: Payload) {
+
+        let channel = match DMChannel::try_from(&payload.d) {
+            Ok(c) => c,
+            Err(error) => return println!("Failed to parse channel {:?}", error)
+        };
+
+        for user in &channel.recipients {
+            self.user_cache.insert(user.id, user.clone());
+        }
+
+        self.channel_cache.insert(channel.id, channel);
+        
+
+    }
     
     async fn handle_payload(&mut self, payload: Payload, channel: &(mpsc::Sender<bool>, mpsc::Receiver<bool>)) {
        
@@ -244,12 +265,12 @@ impl Gateway{
             // DISPATCH
             0 => {
                 self.seq = payload.s.unwrap_or(self.seq);
-                self.update_cache(&payload);
+                self.update_user_cache(&payload);
                 match payload.t.clone() {
                     Some(event) => {
                         match event.as_str() {
                             "MESSAGE_CREATE" => {
-                                self.message_create(payload).await
+                                self.message_create(payload).await;
                             },
                             "READY" => {
                                 self.ready(payload).await
@@ -261,8 +282,12 @@ impl Gateway{
                             "MESSAGE_DELETE" => {
                                 self.add_snipe(payload).await
                             }
+                            "CHANNEL_UPDATE" => {
+                                self.update_channel_cache(payload)
+                            }
                             _ => {
-                                // println!("{} - {:#?}", event, payload.d);
+                                //println!("{} - {:#?}", event, payload.d);
+                                // println!("{}", event);
                             }
                         }
                     },
@@ -444,7 +469,7 @@ impl Gateway{
                 let re = regex::Regex::new(r"(https://((www.tiktok.com/t/)|(vm.tiktok.com/))([0-9,a-z,A-Z]{8,10}))").unwrap();
                 if let Some(m) = re.captures(&content) {
                     let id = m.iter().last().unwrap().unwrap().as_str();
-                    self.send_message(message.channel_id, format!("https://tiktok.ily.pink/{}", id) , Some(message.id)).await;
+                    self.send_message(message.channel_id, format!("https://tiktok.apis.aaix.dev/{}", id) , Some(message.id)).await;
                     return;
                 }
             }
@@ -456,9 +481,6 @@ impl Gateway{
                 },
                 "av" => {
                     self.command_av(message, arg).await;
-                },
-                "banner" => {
-                    self.command_banner(message, arg).await;
                 },
 
                 "payload" => {
@@ -498,16 +520,11 @@ impl Gateway{
                     self.send_message(message.channel_id, leaderboard, Some(message.id)).await;
                 },
                 "cache" => {
-                    let mut total: usize = 0;
-
-                    for (_, v) in &self.message_cache {
-                        total += v.len()
-                    }
 
                     self.send_message(message.channel_id, format!(
-                        "Message cache:\nChannels: {}\nMessages: {}\nUsers: {}",
+                        "Messages: {}\nChannels: {}\nUsers: {}",
                         self.message_cache.len(),
-                        total,
+                        self.channel_cache.len(),
                         self.user_cache.len(),
                     ), Some(message.id)).await
                 }
@@ -543,6 +560,36 @@ impl Gateway{
                             ).await;
                         }
                     }
+                }
+
+                "icon" => {
+
+                    let channel = if let Some(channel) = self.channel_cache.get(&message.channel_id) {
+                        channel
+                    } else {
+                        return self.send_message(
+                            message.channel_id,
+                            "no channel cache",
+                            Some(message.id)
+                        ).await;
+                    };
+
+
+                    
+                    self.send_message(
+                        message.channel_id,
+                        format!("{}", channel.icon(4096)),
+                        Some(message.id)
+                    ).await;
+
+                }
+
+                "created" => {
+                    self.send_message(
+                        message.channel_id,
+                        format!("at {}\n\n({} ago)", self.created, Utc::now().signed_duration_since(self.created)),
+                        Some(message.id)
+                    ).await;
                 }
                 _ => {}
             }
@@ -673,13 +720,21 @@ impl Gateway{
     }
 
     async fn ready(&mut self, payload: Payload) {
-        if let Some(value) = payload.d.d.get("session_id") {
+
+        println!("PARSING READY");
+
+        let data = payload.d.d;
+
+
+        // session id
+        if let Some(value) = data.get("session_id") {
             if let Value::String(string) = value {
                 self.session_id = Some(string.clone())
             }
         }
         
-        if let Some(value) = payload.d.d.get("user") {
+        // current user
+        if let Some(value) = data.get("user") {
             if let Value::Data(d) = value {
 
 
@@ -690,11 +745,51 @@ impl Gateway{
                     },
                     Err(error) => println!("Failed to parse current user {:?} {:?}", d, error)
                 };
-                return
             }
             
         };
-        println!("Ready as ?? {:?}", payload);
+
+        // users
+        if let Some(users) = data.get("users") {
+            if let Value::Array(users) = users {
+                for user in users {
+                    if let Value::Data(d) = user {
+                        match User::try_from(d) {
+                            Ok(u) => {
+                                self.user_cache.insert(u.id, u);
+                            },
+                            Err(error) => println!("Failed to parse user {:?}", error)
+                        };
+                    }
+                }
+                println!("Cached {} users", users.len())
+            }
+        }
+
+        // private channels
+        if let Some(channels) = data.get("private_channels") {
+            if let Value::Array(channels) = channels {
+
+                let mut success = 0;
+                let mut failed = 0;
+
+                for channel in channels {
+                    if let Value::Data(d) = channel {
+                        match DMChannel::try_from(d) {
+                            Ok(c) => {
+                                self.channel_cache.insert(c.id, c);
+                                success += 1;
+                            },
+                            Err(_) => failed += 1
+                        };
+                    }
+                }
+                println!("Cached {} channels ({} failed)", success, failed)
+            }
+        }
+        
+        
+
     }
 
     async fn identify(&mut self, payload: Payload, channel: Option<&mpsc::Sender<bool>>) {
