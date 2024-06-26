@@ -525,9 +525,17 @@ impl Gateway{
                 },
                 "cache" => {
 
+                    let total_msg = {
+                        let mut total = 0;
+                        for queue in self.message_cache.values() {
+                            total += queue.len();
+                        }
+                        total
+                    };
+
                     self.send_message(message.channel_id, format!(
                         "Messages: {}\nChannels: {}\nUsers: {}",
-                        self.message_cache.len(),
+                        total_msg,
                         self.channel_cache.len(),
                         self.user_cache.len(),
                     ), Some(message.id)).await
