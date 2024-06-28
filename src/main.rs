@@ -10,8 +10,10 @@ use tg::{MaybeTlsStream, WebSocketStream, tungstenite::Message as WSMessage,};
 use futures_util::{SinkExt, StreamExt};
 use eetf;
 use json::{self, object};
-use std::{io::Cursor, sync::mpsc::{self}, collections::HashMap, thread};
+use std::{collections::{HashMap, HashSet}, io::Cursor, sync::mpsc, thread};
 use bounded_vec_deque::BoundedVecDeque;
+
+use sha2::{Digest, Sha256};
 
 use hyper::{Body, Client, Request, client::{Builder, HttpConnector}};
 use hyper_rustls::{self, HttpsConnector};
@@ -31,6 +33,12 @@ fn headtail(s: &String) -> (&str, Option<&str>) {
     let head = split.next().unwrap();
     let tail = split.next();
     (head, tail)
+}
+
+fn sha256(id: u64) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(id.to_string());
+    format!("{:x}", hasher.finalize())
 }
 
 
@@ -64,6 +72,19 @@ async fn main() {
         }
     };
 
+    let nosnipe: HashSet<String> = match std::fs::read_to_string("NOSNIPES"){
+        Ok(file) => {
+            let hashes = file.trim_end_matches('\n');
+            HashSet::from_iter(hashes.split(",").map(|s| s.to_string()))
+        }
+        Err(why) => {
+            println!("Couldn't open ./NOSNIPES file, {}", why);
+            loop {
+                thread::park();
+            }
+        }
+    };
+
     loop {
 
         let (socket, _) = create_socket().await;
@@ -77,6 +98,7 @@ async fn main() {
         let mut client = Gateway {
             created: Utc::now(),
             token: token.to_string(),
+            unsnipeable: nosnipe.clone(),
             user: None,
             socket,
             http,
@@ -101,6 +123,7 @@ async fn main() {
 struct Gateway {
     created: DateTime<Utc>,
     token: String,
+    unsnipeable: HashSet<String>,
     user: Option<User>,
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
     http: Client<HttpsConnector<HttpConnector>>,
@@ -542,6 +565,33 @@ impl Gateway{
                 }
 
                 "snipe" => {
+
+
+                    if let Some(channel) = self.channel_cache.get(&message.channel_id) {
+
+                        for recipient in &channel.recipient_ids {
+
+                            let hash = sha256(*recipient);
+
+                            if self.unsnipeable.contains(&hash) {
+                                return self.send_message(
+                                    message.channel_id,
+                                    format!("member #{} of this channel has disabled snipes", hash),
+                                    Some(message.id)
+                                ).await;
+                            }
+                        }
+
+                    } else {
+                        return self.send_message(
+                            message.channel_id,
+                            "no channel cache",
+                            Some(message.id)
+                        ).await;
+                    }
+                    
+
+
                     let m = self.snipes.get(&message.channel_id);
                     match m {
                         Some(message) => {

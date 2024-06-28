@@ -689,6 +689,7 @@ pub struct DMChannel {
     pub name: Option<String>,
     pub id: u64,
     pub recipients: Vec<User>,
+    pub recipient_ids: Vec<u64>,
     pub last_message_id: Option<u64>,
     pub icon_hash: Option<String>,
     pub last_pin_timestamp: Option<String>,
@@ -719,6 +720,22 @@ impl TryFrom<&Data> for DMChannel {
             _ => return Err(ParseError::MissingParam),
         };
 
+        // ready gives recipient ids as an array
+        let mut recipient_ids = match data.d.get("recipient_ids").unwrap_or_default() {
+            Value::Array(array) => {
+                array.iter().map(|v| {
+                    if let Value::BigInt(id) = v {
+                        Some(id.clone())
+                    } else {
+                        None
+                    }
+                }).filter_map(std::convert::identity).collect::<Vec<u64>>()
+
+            },
+            _ => Vec::new()
+        };
+
+        // update gives recipients as an array of user objects
         let recipients = match data.d.get("recipients").unwrap_or_default() {
             Value::Array(array) => {
                 array.iter().map(|v| {
@@ -728,9 +745,15 @@ impl TryFrom<&Data> for DMChannel {
                         None
                     }
                 }).filter_map(std::convert::identity).collect::<Vec<User>>()
+
             },
-            _ => Vec::new(),
+            _ => Vec::new()
         };
+
+        if recipient_ids.is_empty() {
+            recipient_ids = recipients.iter().map(|u| {u.id}).collect::<Vec<u64>>();
+        }
+
 
         let last_message_id = match data.d.get("last_message_id").unwrap_or_default() {
             Value::BigInt(value) => Some(value.clone()),
@@ -767,6 +790,7 @@ impl TryFrom<&Data> for DMChannel {
                 name,
                 id,
                 recipients,
+                recipient_ids,
                 last_message_id,
                 icon_hash,
                 last_pin_timestamp,
