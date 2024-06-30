@@ -879,7 +879,7 @@ impl Gateway{
                             Value::Data(Data::new(vec![
                                 ("emoji", Value::NoneType),
                                 ("name", Value::String("Custom Status".to_string())),
-                                ("state", Value::String(":3".to_string())),
+                                ("state", Value::String(">.<".to_string())),
                                 ("type", Value::Integer(4))
                             ]))
                         ])),
